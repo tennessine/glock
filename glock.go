@@ -1,10 +1,11 @@
-// Copyright © 2014 Alienero. All rights reserved.
+// Copyright © 2015 Alienero. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package glock
 
 import (
+	"log"
 	"sync"
 
 	"github.com/coreos/go-etcd/etcd"
@@ -42,6 +43,7 @@ func NewMutex(key string, id string, ttl uint64, machines []string) *Mutex {
 	}
 }
 
+// Get a lock. When you set the ttl, if the timeout the lock will be automatically released.
 func (m *Mutex) Lock() (err error) {
 	m.mutex.Lock()
 	for try := 1; try <= 3; try++ {
@@ -57,34 +59,36 @@ func (m *Mutex) Lock() (err error) {
 						try--
 						continue
 					}
+					record("get ok")
 					value := resp.Node.Value
 					// Watch the lock node.
-					receiver := make(chan *etcd.Response)
-					stop := make(chan bool)
-					resp, err = m.client.Watch(m.key, 0, false, receiver, stop)
+					record("will watch")
+					_, err = m.client.Watch(m.key, 0, false, nil, nil)
 					if err != nil {
 						// Always try.
 						try--
 						continue
 					}
-					<-receiver
-					stop <- true
+					record("watch done.")
 					// election.
 					resp, err = m.client.CompareAndSwap(m.key, m.id, m.ttl, value, 0)
 					if err != nil {
 						goto wait
 					}
+					record("swap ok")
 				} else {
 					continue
 				}
 			}
 		}
+		record("create ok")
 		// Get the lock.
 		break
 	}
 	return
 }
 
+// Unlock.
 func (m *Mutex) Unlock() (err error) {
 	defer m.mutex.Unlock()
 	for i := 1; i <= 3; i++ {
@@ -98,4 +102,13 @@ func (m *Mutex) Unlock() (err error) {
 		break
 	}
 	return
+}
+
+var debug = false
+var logger *log.Logger
+
+func record(str string) {
+	if debug {
+		logger.Println(str)
+	}
 }
